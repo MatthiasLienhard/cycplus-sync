@@ -189,6 +189,7 @@ preferences, the weight in Health Connect.
 
 ## Credits
 
+- **Original author:** [Andrew Komkov](https://github.com/andrewkomkov)
 - [ekspla/xoss_sync](https://github.com/ekspla/xoss_sync) — the working Python implementation of
   the protocol that this project started from
 - [Kaiserdragon2/CycSync](https://github.com/Kaiserdragon2/CycSync) — an earlier Android attempt
