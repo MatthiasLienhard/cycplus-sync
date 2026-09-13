@@ -20,6 +20,7 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Terrain
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -105,6 +106,7 @@ private fun labelOf(metric: TrackMetric): String =
             TrackMetric.SPEED -> R.string.chart_speed
             TrackMetric.HEART_RATE -> R.string.chart_heart_rate
             TrackMetric.CADENCE -> R.string.chart_cadence
+            TrackMetric.POWER -> R.string.chart_power
         },
     )
 
@@ -116,6 +118,7 @@ private fun unitOf(metric: TrackMetric): String =
             TrackMetric.SPEED -> R.string.unit_kmh
             TrackMetric.HEART_RATE -> R.string.unit_bpm
             TrackMetric.CADENCE -> R.string.unit_rpm
+            TrackMetric.POWER -> R.string.unit_watts
         },
     )
 
@@ -125,6 +128,7 @@ private fun iconOf(metric: TrackMetric) =
         TrackMetric.SPEED -> Icons.Rounded.Speed
         TrackMetric.HEART_RATE -> Icons.Rounded.Favorite
         TrackMetric.CADENCE -> Icons.Rounded.Refresh
+        TrackMetric.POWER -> Icons.Rounded.Bolt
     }
 
 /**

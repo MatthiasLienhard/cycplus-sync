@@ -17,10 +17,24 @@ import argparse
 import asyncio
 import os
 import sys
+from uuid import UUID
 
 from bleak import BleakClient
-from bleak.uuids import normalize_uuid_str, uuidstr_to_str
 from m2 import M2, M2Error, find_device, scan
+
+
+def _uuid_label(value: str) -> str:
+    try:
+        return str(UUID(value).int)
+    except ValueError:
+        return value
+
+
+def _uuid_name(value: str) -> str:
+    try:
+        return str(UUID(value))
+    except ValueError:
+        return value
 
 
 async def connected(args):
@@ -107,7 +121,7 @@ async def cmd_services(args):
     async with BleakClient(device.address, timeout=60.0) as client:
         print(f"MTU {client.mtu_size}\n")
         for service in client.services:
-            title = uuidstr_to_str(normalize_uuid_str(service.uuid)) or ""
+            title = _uuid_label(service.uuid)
             print(f"SERVICE {service.uuid}  {title}")
             for ch in service.characteristics:
                 value = ""
@@ -120,7 +134,7 @@ async def cmd_services(args):
                             value = f"= {raw.hex(' ')}"
                     except Exception:
                         value = "(read failed)"
-                known = uuidstr_to_str(normalize_uuid_str(ch.uuid)) or ""
+                known = _uuid_name(ch.uuid)
                 print(
                     f"   CHAR {ch.uuid}  [{','.join(ch.properties)}]  {known} {value}"
                 )

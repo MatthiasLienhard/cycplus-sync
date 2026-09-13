@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">M2 Sync</string>
-    <string name="rationale">This app downloads recorded rides from a Cycplus M2 bike computer over Bluetooth and stores them in Health Connect. Nothing is uploaded anywhere — the data stays on your device.</string>
+    <string name="app_name">CYCPLUS Sync</string>
+    <string name="rationale">This app downloads recorded rides from CYCPLUS and compatible XOSS bike computers over Bluetooth and stores them in Health Connect. Nothing is uploaded anywhere — the data stays on your device.</string>
     <string name="rationale_what">What goes into Health Connect</string>
     <string name="rationale_ride">Ride: duration, distance, elevation gain</string>
     <string name="rationale_heart">Heart rate and cadence, sample by sample</string>
@@ -11,12 +11,12 @@
     <string name="rationale_close">Got it</string>
 
     <!-- Screen -->
-    <string name="title_rides">Rides from M2</string>
+    <string name="title_rides">Rides from CYCPLUS</string>
     <string name="subtitle_rides">%1$d in the list</string>
     <string name="cd_permissions">Permissions</string>
     <string name="device_unknown">Bike computer not polled yet</string>
     <string name="device_hint">tap “Poll”</string>
-    <string name="device_default_name">Cycplus M2</string>
+    <string name="device_default_name">CYCPLUS bike computer</string>
     <string name="battery_caption">battery</string>
     <string name="firmware_label">firmware</string>
     <string name="memory_line">memory: %1$d of %2$d KB</string>
@@ -56,11 +56,15 @@
     <string name="chip_total">%1$d min total</string>
     <string name="chip_hr">%1$d bpm</string>
     <string name="chip_cadence">%1$d rpm</string>
+    <string name="detail_avg_power">average power</string>
+    <string name="chart_power">power</string>
+    <string name="unit_watts">W</string>
+    <string name="power_curve_title">best average power</string>
     <string name="chip_ascent">+%1$d m</string>
     <string name="chip_points">%1$d points</string>
     <string name="cd_in_health">Saved in Health Connect</string>
     <string name="ride_distance">%1$s km</string>
-    <string name="session_title">Cycplus M2 ride</string>
+    <string name="session_title">CYCPLUS ride</string>
 
     <!-- Log messages -->
     <string name="log_scanning">looking for devices ‘%1$s*’</string>

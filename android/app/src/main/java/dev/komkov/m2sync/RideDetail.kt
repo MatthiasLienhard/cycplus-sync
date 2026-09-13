@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Terrain
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.ViewInAr
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -187,36 +188,9 @@ fun RideDetailScreen(
             }
 
             if (loaded.hasRoute) {
-                ElevatedCard(shape = RoundedCornerShape(28.dp)) {
-                    Box {
-                        RouteMap(
-                            track = loaded,
-                            tiles = tiles,
-                            highlight = highlight,
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(260.dp)
-                                    .clip(RoundedCornerShape(28.dp)),
-                        )
-                        FilledTonalIconButton(
-                            onClick = {
-                                haptics.tick()
-                                Settings.setMapLayer(ctx, mapLayer.next())
-                            },
-                            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-                        ) {
-                            Icon(layerIcon(mapLayer), stringResource(R.string.cd_basemap))
-                        }
-                    }
-                }
-
-                // Главное новое действие экрана, поэтому кнопка во всю ширину и
-                // высокая: её ищут глазами, а не по иконке в шапке.
+                // Keep the 3D action visible before the map; it is the primary route action.
                 Button(
                     onClick = {
-                        // Взлёт меняет экран целиком, поэтому отклик здесь
-                        // весомее, чем у обычной кнопки.
                         haptics.done()
                         flying = true
                     },
@@ -236,6 +210,49 @@ fun RideDetailScreen(
                         fontWeight = FontWeight.Bold,
                     )
                 }
+
+                ElevatedCard(shape = RoundedCornerShape(28.dp)) {
+                    Box {
+                        RouteMap(
+                            track = loaded,
+                            tiles = tiles,
+                            highlight = highlight,
+                            metric = metric,
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(260.dp)
+                                    .clip(RoundedCornerShape(28.dp)),
+                        )
+                        FilledTonalIconButton(
+                            onClick = {
+                                haptics.tick()
+                                Settings.setMapLayer(ctx, mapLayer.next())
+                            },
+                            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                        ) {
+                            Icon(layerIcon(mapLayer), stringResource(R.string.cd_basemap))
+                        }
+                    }
+
+                    if (TrackMetric.entries.any { loaded.has(it) }) {
+                        Card(shape = RoundedCornerShape(28.dp)) {
+                            Column(Modifier.padding(16.dp)) {
+                                RideChartCard(
+                                    track = loaded,
+                                    metric = metric,
+                                    onMetric = {
+                                        metric = it
+                                        highlight = null
+                                    },
+                                    highlight = highlight,
+                                    onHighlight = { highlight = it },
+                                )
+                            }
+                        }
+                    }
+                }
+
             }
 
             FlowRow(
@@ -290,6 +307,15 @@ fun RideDetailScreen(
                         tile,
                     )
                 }
+                ride.avgPower?.let {
+                    DetailStat(
+                        Icons.Rounded.Bolt,
+                        stringResource(R.string.detail_avg_power),
+                        it.toString(),
+                        stringResource(R.string.unit_watts),
+                        tile,
+                    )
+                }
                 loaded.maxHeartRate?.let {
                     DetailStat(
                         Icons.Rounded.Favorite,
@@ -326,19 +352,34 @@ fun RideDetailScreen(
                 }
             }
 
-            if (TrackMetric.entries.any { loaded.has(it) }) {
+            val powerCurve = remember(loaded) { PowerCurve.calculate(loaded.points) }
+            if (powerCurve.isNotEmpty()) {
                 Card(shape = RoundedCornerShape(28.dp)) {
                     Column(Modifier.padding(16.dp)) {
-                        RideChartCard(
-                            track = loaded,
-                            metric = metric,
-                            onMetric = {
-                                metric = it
-                                highlight = null
-                            },
-                            highlight = highlight,
-                            onHighlight = { highlight = it },
+                        Text(
+                            stringResource(R.string.power_curve_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
                         )
+                        Spacer(Modifier.height(8.dp))
+                        powerCurve.forEach { best ->
+                            Row(
+                                Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    powerDurationLabel(best.seconds),
+                                    modifier = Modifier.width(64.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    "${best.watts} ${stringResource(R.string.unit_watts)}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -367,6 +408,13 @@ fun RideDetailScreen(
         }
     }
 }
+
+private fun powerDurationLabel(seconds: Int): String =
+    when {
+        seconds < 60 -> "${seconds}s"
+        seconds % 60 == 0 && seconds < 3600 -> "${seconds / 60}m"
+        else -> "${seconds / 60}m ${seconds % 60}s"
+    }
 
 @Composable
 private fun DetailStat(

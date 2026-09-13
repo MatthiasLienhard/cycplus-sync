@@ -239,17 +239,17 @@ fun DeviceCard(
                         Text(it, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
-                if (device?.freeKb != null && device.totalKb != null) {
-                    val used = device.usedKb ?: 0
+                device?.usedKb?.let { used ->
+                    val total = device.totalKb!!
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        stringResource(R.string.memory_line, used, device.totalKb),
+                        stringResource(R.string.memory_line, used, total),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(4.dp))
                     LinearProgressIndicator(
-                        progress = { used.toFloat() / device.totalKb.toFloat() },
+                        progress = { used.toFloat() / total.toFloat() },
                         modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
                     )
                 }

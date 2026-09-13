@@ -14,6 +14,7 @@ import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.FhirResource
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.MedicalResource
+import androidx.health.connect.client.records.PowerRecord
 import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.SpeedRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
@@ -26,18 +27,19 @@ import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import androidx.health.connect.client.units.Energy
 import androidx.health.connect.client.units.Length
+import androidx.health.connect.client.units.Power
 import androidx.health.connect.client.units.Velocity
 import java.time.ZoneId
 import java.time.ZoneOffset
 
 /**
- * Запись заезда в Health Connect.
+ * Writes a ride to Health Connect.
  *
- * Дедупликация — на clientRecordId вида "m2:<имя файла>": повторный импорт того же
- * файла обновляет запись, а не плодит дубли.
+ * Deduplication uses a clientRecordId in the form "m2:<file name>": importing
+ * the same file again updates the record instead of creating duplicates.
  */
 object HealthWriter {
-    /** Больше точек Health Connect в один маршрут не принимает. */
+    /** Health Connect does not accept more route points in one record. */
     private const val MAX_ROUTE_POINTS = 1000
     private const val MAX_SAMPLES_PER_RECORD = 1000
 
@@ -63,25 +65,27 @@ object HealthWriter {
             HealthPermission.getWritePermission(SpeedRecord::class),
             HealthPermission.getWritePermission(ElevationGainedRecord::class),
             HealthPermission.getWritePermission(CyclingPedalingCadenceRecord::class),
+            HealthPermission.getWritePermission(PowerRecord::class),
             HealthPermission.getWritePermission(TotalCaloriesBurnedRecord::class),
             HealthPermission.getWritePermission(WeightRecord::class),
             HealthPermission.PERMISSION_WRITE_EXERCISE_ROUTE,
         )
 
-    /** Самопроверка плюс вес: калории считаем сами, а вес ведёт кто-то другой. */
+    /** Self-check plus weight: we calculate calories, while another source owns weight. */
     val readPermissions: Set<String> =
         setOf(
             HealthPermission.getReadPermission(ExerciseSessionRecord::class),
             HealthPermission.getReadPermission(HeartRateRecord::class),
             HealthPermission.getReadPermission(DistanceRecord::class),
             HealthPermission.getReadPermission(CyclingPedalingCadenceRecord::class),
+            HealthPermission.getReadPermission(PowerRecord::class),
             HealthPermission.getReadPermission(SpeedRecord::class),
             HealthPermission.getReadPermission(WeightRecord::class),
         )
 
     /**
-     * Медкарта — отдельная ветка Health Connect со своим разрешением, и она есть
-     * не на каждом устройстве. Запрашиваем только когда доступна.
+    * Medical records are a separate Health Connect branch with their own permission,
+    * and are not available on every device. Request them only when available.
      */
     @OptIn(ExperimentalPersonalHealthRecordApi::class)
     val medicalPermissions: Set<String> =
@@ -98,9 +102,9 @@ object HealthWriter {
         }.getOrDefault(false)
 
     /**
-     * Год рождения и пол из FHIR-ресурса Patient. Заполняется только импортом
-     * медкарты от провайдера, поэтому у большинства здесь пусто — тогда null,
-     * и профиль берётся из диалога.
+    * Reads birth year and sex from a FHIR Patient resource. This is populated only
+    * by a provider's medical-record import, so it is null for most users and the
+    * profile is taken from the dialog instead.
      */
     @OptIn(ExperimentalPersonalHealthRecordApi::class)
     suspend fun readPersonalDetails(ctx: Context): Calories.Profile? {
@@ -123,8 +127,8 @@ object HealthWriter {
     }
 
     /**
-     * Последний известный вес — на нём стоит весь расчёт калорий.
-     * Берём любой источник: весы, Fit, ручной ввод — неважно чей.
+    * The latest known weight is used for all calorie calculations.
+    * Any source is acceptable: scale, Fit, or manual entry.
      */
     suspend fun readLatestWeight(ctx: Context): WeightReading? =
         client(ctx)
@@ -139,7 +143,7 @@ object HealthWriter {
             .firstOrNull()
             ?.let { WeightReading(it.weight.inKilograms, it.time) }
 
-    /** Замер с весов. Источник — сами весы, поэтому пишем их как устройство. */
+    /** A scale measurement. The source is the scale itself, so record it as the device. */
     suspend fun writeWeight(
         ctx: Context,
         kilograms: Double,
@@ -171,7 +175,7 @@ object HealthWriter {
                 ),
             ).records
 
-    /** Только свои записи: иначе в окно попадает то, что параллельно писал Google Fit. */
+    /** Only our records; otherwise entries written by Google Fit also enter the range. */
     private fun ownOrigin(ctx: Context) = setOf(DataOrigin(ctx.packageName))
 
     suspend fun readDistanceTotal(
@@ -250,9 +254,9 @@ object HealthWriter {
             .sumOf { it.energy.inKilocalories }
 
     /**
-     * Кто ещё пишет в то же окно: тип записи -> источник -> число сэмплов.
-     * Fit рисует графики по всем источникам сразу, поэтому чужие записи важнее
-     * своих: именно они объясняют расхождение с .fit.
+    * Shows who else writes in the same time range: record type -> source -> sample count.
+    * Fit draws charts from all sources together, so foreign records matter because
+    * they explain differences from the .fit file.
      */
     suspend fun readOrigins(
         ctx: Context,
@@ -276,6 +280,7 @@ object HealthWriter {
             "heart rate" to count(HeartRateRecord::class) { it.samples.size },
             "speed" to count(SpeedRecord::class) { it.samples.size },
             "cadence" to count(CyclingPedalingCadenceRecord::class) { it.samples.size },
+            "power" to count(PowerRecord::class) { it.samples.size },
             "distance" to count(DistanceRecord::class) { 1 },
             "session" to count(ExerciseSessionRecord::class) { 1 },
         )
@@ -305,7 +310,12 @@ object HealthWriter {
 
         val route =
             ride.points
-                .filter { it.lat != null && it.lon != null }
+                .filter {
+                    it.lat != null &&
+                        it.lon != null &&
+                        !it.time.isBefore(ride.start) &&
+                        it.time.isBefore(ride.end)
+                }
                 .downsample(MAX_ROUTE_POINTS)
                 .map {
                     ExerciseRoute.Location(
@@ -316,8 +326,8 @@ object HealthWriter {
                     )
                 }
 
-        // Сессия занимает всё время заезда, а остановки размечаем паузами —
-        // тогда «активная длительность» в Health Connect совпадёт со временем в движении.
+        // The session covers the entire ride, while stops are marked as pauses so
+        // Health Connect's active duration matches the time spent moving.
         val segments = ArrayList<ExerciseSegment>()
         ride.activeSpans.forEachIndexed { i, span ->
             if (i > 0) {
@@ -437,6 +447,22 @@ object HealthWriter {
                             SpeedRecord.Sample(it.time, Velocity.metersPerSecond(it.speed!!))
                         },
                     metadata = meta("speed$i"),
+                )
+        }
+
+        val powerPoints = ride.points.filter { it.power != null && it.power >= 0 }
+        powerPoints.chunked(MAX_SAMPLES_PER_RECORD).forEachIndexed { i, chunk ->
+            records +=
+                PowerRecord(
+                    startTime = chunk.first().time,
+                    startZoneOffset = startOffset,
+                    endTime = chunk.last().time.plusSeconds(1),
+                    endZoneOffset = endOffset,
+                    samples =
+                        chunk.map {
+                            PowerRecord.Sample(it.time, Power.watts(it.power!!.toDouble()))
+                        },
+                    metadata = meta("power$i"),
                 )
         }
 

@@ -18,6 +18,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.io.ByteArrayOutputStream
+import java.util.Arrays
 import java.util.UUID
 
 class M2Error(
@@ -36,11 +37,11 @@ data class DeviceFile(
 )
 
 /**
- * Клиент велокомпьютера Cycplus M2 (и родственных XOSS) поверх Nordic UART Service.
+ * Cycplus M2 (and related XOSS) bike computer client over Nordic UART Service.
  *
- * Устройство отдаёт файлы по YMODEM: команды и ответы идут по CTL-характеристике,
- * поток блоков — по TX, квитанции пишем в RX. Протокол проверен на M2 (прошивка V1.4.0):
- * MTU 185, блок приходит одной нотификацией, на STATUS отвечает одним байтом 0x04.
+ * The device sends files using YMODEM: commands and responses use the CTL characteristic,
+ * the block stream uses TX, and acknowledgements are written to RX. The protocol was tested
+ * on M2 firmware V1.4.0: MTU 185, one notification per block, and STATUS responds with 0x04.
  */
 @SuppressLint("MissingPermission")
 class M2Client(
@@ -57,13 +58,17 @@ class M2Client(
         val FIRMWARE_REV: UUID = UUID.fromString("00002a26-0000-1000-8000-00805f9b34fb")
         private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
-        private const val SOH: Byte = 0x01 // блок на 128 байт данных
-        private const val STX: Byte = 0x02 // блок на 1024 байта данных
+        private const val SOH: Byte = 0x01 // 128-byte data block
+        private const val STX: Byte = 0x02 // 1024-byte data block
+        private val M3_MAGIC0: Byte = 0x55.toByte()
+        private val M3_MAGIC1: Byte = 0xAA.toByte()
         private const val ACK: Byte = 0x06
         private const val NAK: Byte = 0x15
         private const val EOT: Byte = 0x04
         private const val CAN: Byte = 0x18
-        private const val C: Byte = 0x43 // запрос начала передачи
+        private const val C: Byte = 0x43 // request transfer start
+        private const val M3_FRAME_SIZE: Int = 1031
+        private const val M3_PAYLOAD_SIZE: Int = 1024
 
         private val CMD_STATUS = byteArrayOf(0xFF.toByte(), 0x00, 0xFF.toByte())
         private val CMD_IDLE = byteArrayOf(0x04, 0x00, 0x04)
@@ -80,6 +85,7 @@ class M2Client(
     private val ctlIn = Channel<ByteArray>(Channel.UNLIMITED)
     private val txIn = Channel<ByteArray>(Channel.UNLIMITED)
     private val opLock = Mutex()
+    private var pendingRx = ByteArrayOutputStream()
 
     private var onConnected = CompletableDeferred<Unit>()
     private var onServices = CompletableDeferred<Unit>()
@@ -91,7 +97,7 @@ class M2Client(
     var mtu: Int = 23
         private set
 
-    // ---------------------------------------------------------------- поиск
+    // ---------------------------------------------------------------- discovery
 
     suspend fun scan(
         namePrefix: String,
@@ -106,7 +112,8 @@ class M2Client(
                     result: ScanResult,
                 ) {
                     val name = result.device.name ?: result.scanRecord?.deviceName ?: return
-                    if (!name.startsWith(namePrefix, ignoreCase = true)) return
+                    val isCompatibleCycplus = name.startsWith("CYCPLUS", ignoreCase = true)
+                    if (!name.startsWith(namePrefix, ignoreCase = true) && !(namePrefix.equals("M2_", ignoreCase = true) && isCompatibleCycplus)) return
                     if (found.put(name, FoundDevice(name, result.device.address, result.rssi)) == null) {
                         LogBus.i(R.string.log_found, name, result.device.address, result.rssi)
                     }
@@ -130,7 +137,7 @@ class M2Client(
         return found.values.toList()
     }
 
-    // ------------------------------------------------------------ соединение
+    // ------------------------------------------------------------ connection
 
     private val callback =
         object : BluetoothGattCallback() {
@@ -265,7 +272,7 @@ class M2Client(
             String(withTimeout(5_000) { onRead.await() }).trim()
         }.getOrNull()
 
-    // -------------------------------------------------------------- команды
+    // -------------------------------------------------------------- commands
 
     private suspend fun write(
         uuid: UUID,
@@ -302,7 +309,7 @@ class M2Client(
         while (ctlIn.tryReceive().isSuccess) Unit
         ctl(CMD_STATUS)
         val rsp = runCatching { awaitCtl(3_000) }.getOrNull()
-        // M2 отвечает одним байтом 0x04, XOSS G+ — тремя (04 00 04)
+        // M2 responds with one byte, 0x04; XOSS G+ responds with three (04 00 04).
         if (rsp != null && (rsp.contentEquals(CMD_IDLE) || (rsp.size == 1 && rsp[0] == EOT))) return
         ctl(CMD_IDLE)
         val again =
@@ -321,7 +328,7 @@ class M2Client(
         return String(rsp, 1, rsp.size - 2).trim()
     }
 
-    // --------------------------------------------------------- приём файлов
+    // --------------------------------------------------------- file reception
 
     private sealed interface Block {
         data class Data(
@@ -332,25 +339,66 @@ class M2Client(
         data object End : Block
     }
 
-    /** Собирает один YMODEM-блок из нотификаций TX. */
+    /** Collects one block from TX notifications.
+     * After block 0, M3 sends a custom 55 aa stream with 1024 data bytes and a two-byte trailer,
+     * so standard YMODEM parsing must only be used after a standard SOH/STX block is recognized.
+     */
     private suspend fun readBlock(timeoutMs: Long = 15_000): Block {
-        val buf = ByteArray(3 + 1024 + 2)
-        var idx = 0
-        var blockSize = -1
-        while (true) {
-            val packet = withTimeout(timeoutMs) { txIn.receive() }
-            if (idx == 0 && packet.size == 1 && packet[0] == EOT) return Block.End
-            if (idx + packet.size > buf.size) throw M2Error("block longer than expected")
-            System.arraycopy(packet, 0, buf, idx, packet.size)
-            idx += packet.size
-            if (blockSize < 0) blockSize = if (buf[0] == STX) 3 + 1024 + 2 else 3 + 128 + 2
-            if (idx >= blockSize) break
+        val buf = ByteArrayOutputStream()
+        if (pendingRx.size() > 0) {
+            buf.write(pendingRx.toByteArray())
+            pendingRx.reset()
         }
-        val dataLen = blockSize - 5
-        val payload = buf.copyOfRange(3, 3 + dataLen)
-        val crcGot = ((buf[3 + dataLen].toInt() and 0xFF) shl 8) or (buf[4 + dataLen].toInt() and 0xFF)
-        if (crcGot != crc16Arc(payload)) throw M2Error("bad block: CRC mismatch")
-        return Block.Data(buf[1].toInt() and 0xFF, payload)
+
+        while (true) {
+            if (buf.size() >= 2) {
+                val head = buf.toByteArray()
+                if (head[0] == M3_MAGIC0.toByte() && head[1] == M3_MAGIC1.toByte()) {
+                    if (buf.size() < M3_FRAME_SIZE) {
+                        val packet = withTimeout(timeoutMs) { txIn.receive() }
+                        if (packet.size == 1 && packet[0] == EOT) return Block.End
+                        buf.write(packet)
+                        continue
+                    }
+                    val frame = buf.toByteArray()
+                    val rest = Arrays.copyOfRange(frame, M3_FRAME_SIZE, frame.size)
+                    pendingRx.reset()
+                    pendingRx.write(rest)
+                    val payload = frame.copyOfRange(5, 5 + M3_PAYLOAD_SIZE)
+                    return Block.Data(frame[2].toInt() and 0xFF, payload)
+                }
+            }
+
+            val packet = withTimeout(timeoutMs) { txIn.receive() }
+            if (buf.size() == 0 && packet.size == 1 && packet[0] == EOT) return Block.End
+            buf.write(packet)
+            if (buf.size() > M3_FRAME_SIZE) throw M2Error("notification longer than expected")
+            if (buf.size() < 2) continue
+
+            val head = buf.toByteArray()
+            if (head[0] == SOH.toByte() || head[0] == STX.toByte()) {
+                val blockSize = if (head[0] == STX.toByte()) 3 + 1024 + 2 else 3 + 128 + 2
+                if (buf.size() < blockSize) continue
+                if (buf.size() > blockSize) throw M2Error("notification longer than expected")
+                val payload = head.copyOfRange(3, 3 + (blockSize - 5))
+                val crcGot = ((head[3 + (blockSize - 5)].toInt() and 0xFF) shl 8) or (head[4 + (blockSize - 5)].toInt() and 0xFF)
+                if (crcGot != crc16Arc(payload)) throw M2Error("bad block: CRC mismatch")
+                val rest = head.copyOfRange(blockSize, head.size)
+                pendingRx.reset()
+                pendingRx.write(rest)
+                return Block.Data(head[1].toInt() and 0xFF, payload)
+            }
+
+            if (head[0] == M3_MAGIC0.toByte() && head[1] == M3_MAGIC1.toByte()) {
+                if (buf.size() < M3_FRAME_SIZE) continue
+                val frame = head
+                val rest = Arrays.copyOfRange(frame, M3_FRAME_SIZE, frame.size)
+                pendingRx.reset()
+                pendingRx.write(rest)
+                val payload = frame.copyOfRange(5, 5 + M3_PAYLOAD_SIZE)
+                return Block.Data(frame[2].toInt() and 0xFF, payload)
+            }
+        }
     }
 
     suspend fun fetchFile(name: String): ByteArray {
@@ -393,7 +441,7 @@ class M2Client(
             }
         }
 
-        // Завершение передачи: NAK -> второй EOT -> ACK -> idle
+        // Complete the transfer: NAK -> second EOT -> ACK -> idle.
         rx(NAK)
         runCatching { withTimeout(5_000) { txIn.receive() } }
         rx(ACK)

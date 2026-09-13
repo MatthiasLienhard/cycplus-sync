@@ -29,10 +29,11 @@ data class TrackPoint(
     val cadence: Int?,
     /** Секунд от начала заезда. */
     val elapsed: Long,
+    val power: Int? = null,
 )
 
 /** Что за величину показываем на графике и чем красим трек. */
-enum class TrackMetric { ELEVATION, SPEED, HEART_RATE, CADENCE }
+enum class TrackMetric { ELEVATION, SPEED, HEART_RATE, CADENCE, POWER }
 
 /**
  * Разобранный заезд, готовый к отрисовке.
@@ -68,6 +69,7 @@ class RideTrack(
             TrackMetric.SPEED -> maxSpeed > 0.5
             TrackMetric.HEART_RATE -> points.any { (it.heartRate ?: 0) > 0 }
             TrackMetric.CADENCE -> points.any { (it.cadence ?: 0) > 0 }
+            TrackMetric.POWER -> points.any { (it.power ?: 0) >= 0 }
         }
 
     fun valueAt(
@@ -80,6 +82,7 @@ class RideTrack(
             TrackMetric.SPEED -> p.speedKmh
             TrackMetric.HEART_RATE -> p.heartRate?.takeIf { it > 0 }?.toDouble()
             TrackMetric.CADENCE -> p.cadence?.takeIf { it > 0 }?.toDouble()
+            TrackMetric.POWER -> p.power?.takeIf { it >= 0 }?.toDouble()
         }
     }
 
@@ -163,6 +166,7 @@ class RideTrack(
                             speedKmh = (p.speed ?: 0.0) * 3.6,
                             heartRate = p.heartRate,
                             cadence = p.cadence,
+                                            power = p.power,
                             elapsed = Duration.between(ride.start, p.time).seconds.coerceAtLeast(0),
                         ).also { prev = it }
                 }

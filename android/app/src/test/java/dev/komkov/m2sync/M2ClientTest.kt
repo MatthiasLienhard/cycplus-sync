@@ -668,9 +668,9 @@ class M2ClientTest {
     // ---------------------------------------------------------------- поиск
 
     /**
-     * Тень сканера сама раздаёт заготовленные результаты только при непустом
-     * списке фильтров, а клиент сканирует без них — поэтому колбэк дёргаем сами,
-     * дождавшись начала сканирования.
+     * The scanner shadow only emits prepared results for a non-empty filter list,
+     * while the client scans without filters, so invoke the callback ourselves
+     * after scanning starts.
      */
     private fun scanning(
         prefix: String,
@@ -702,13 +702,26 @@ class M2ClientTest {
                 cb.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, ScanResult(wanted, null, -55, 0))
                 cb.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, ScanResult(wanted, null, -70, 1))
                 cb.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, ScanResult(alien, null, -40, 2))
-                // Имя может быть только в рекламе, устройство его не отдаёт.
+                // The name may exist only in the advertisement, not on the device.
                 cb.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, ScanResult(nameless, localName("M2_9999"), -60, 3))
             }
 
         assertEquals(setOf("M2_1234", "M2_9999"), found.map { it.name }.toSet())
         assertEquals("AA:BB:CC:DD:EE:11", found.first { it.name == "M2_1234" }.address)
         assertEquals(-60, found.first { it.name == "M2_9999" }.rssi)
+    }
+
+    @Test
+    fun `the default M2 prefix also finds CYCPLUS devices`() {
+        val wanted = adapter().getRemoteDevice("AA:BB:CC:DD:EE:14")
+        Shadow.extract<ShadowBluetoothDevice>(wanted).setName("CYCPLUS M3")
+
+        val found =
+            scanning("M2_") { cb ->
+                cb.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, ScanResult(wanted, null, -48, 0))
+            }
+
+        assertEquals("CYCPLUS M3", found.single().name)
     }
 
     @Test

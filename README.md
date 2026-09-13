@@ -1,4 +1,4 @@
-# M2 Sync — Cycplus M2 / XOSS bike computer → Health Connect
+# CYCPLUS Sync — CYCPLUS / XOSS bike computers → Health Connect
 
 [![Build](https://github.com/andrewkomkov/cycplus-m2-sync/actions/workflows/build.yml/badge.svg)](https://github.com/andrewkomkov/cycplus-m2-sync/actions/workflows/build.yml)
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=andrewkomkov_cycplus-m2-sync&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=andrewkomkov_cycplus-m2-sync)
@@ -6,9 +6,9 @@
 [![Release](https://img.shields.io/github/v/release/andrewkomkov/cycplus-m2-sync?sort=semver)](https://github.com/andrewkomkov/cycplus-m2-sync/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Download rides from a **Cycplus M2** (and other XOSS-family) GPS bike computer straight to your
-Android phone over Bluetooth LE, write them into **Health Connect**, and export the raw `.fit`
-files anywhere you like — **without the vendor cloud, without an account, without the XOSS app**.
+Download rides from a **CYCPLUS or XOSS** GPS bike computer straight to your Android phone over
+Bluetooth LE, write them into **Health Connect**, and export the raw `.fit` files anywhere you
+like — **without the vendor cloud, without an account, without the vendor app**.
 
 [Читать по-русски](README.ru.md)
 
@@ -33,11 +33,11 @@ Strava subscription on its Standard tier, which is where an app like this one la
 ## Features
 
 - **Bluetooth LE sync** — finds the bike computer, downloads only new rides (228 KB in ~13 s)
-- **Health Connect import** — cycling session with GPS route, heart rate, cadence, speed,
+- **Health Connect import** — cycling session with GPS route, heart rate, cadence, speed, power,
   distance, elevation gain; pauses are written as segments so *moving time* stays correct
 - **No duplicates** — de-duplicated by `clientRecordId`, re-running a sync is safe
 - **Raw `.fit` export** — share one ride or many at once, with readable file names like
-  `2026-07-24_10-30_40.99km_cycplus-m2.fit`
+  `2026-07-24_10-30_40.99km_cycplus.fit`
 - **Calories the M2 never records** — estimated from heart rate (Keytel et al., 2005), with a
   speed-based MET fallback, and written as `TotalCaloriesBurnedRecord`
 - **Smart scale support** — reads weight straight off a Bluetooth scale's advertisement and files
@@ -49,13 +49,16 @@ Strava subscription on its Standard tier, which is where an app like this one la
   place: the APK is fetched in-app, checked against the published sha256, and handed to the system
   installer, so all you see is Android's own "update this app?" dialog
 - **Ride in detail** — tap a ride for its route on an OpenStreetMap basemap plus elevation,
-  speed, heart-rate and cadence charts you can scrub with a finger
+  speed, heart-rate, cadence and power charts; select a metric to color the route
+- **Power curve** — best average power over logarithmically spaced intervals, from seconds to
+  longer efforts
 - **3D fly-through** — fly the track from a bird's-eye chase camera, with the map draped on the
   ground in perspective; drag to orbit, pinch to zoom, double-tap to recentre. No API key and no
   account, and the basemap switches off if you want the ride to stay fully offline
 - **Fully scriptable over ADB** — every action runs headless, no tapping required
 - **Material 3 Expressive UI** with dynamic colour, English and Russian localisation
-- **Device card** — model, firmware, battery, free memory read straight off the device
+- **Device card** — model, firmware and battery read straight off the device; storage is shown
+  only when the device reports a valid value
 
 ## Install
 
@@ -116,12 +119,13 @@ adb pull /storage/emulated/0/Android/data/dev.komkov.m2sync/files/fit ./rides
 
 ## Supported devices
 
-Verified on **Cycplus M2**, firmware V1.4.0.
+Verified on **Cycplus M2**, firmware V1.4.0, and **CYCPLUS M3**, firmware V1.1.9.
 
-The same Nordic UART + YMODEM protocol is used across the XOSS family, so these are expected to
-work with the `--name` prefix adjusted: XOSS G / G+ Gen1 / G2+ / Gen3 / NAV / Sprint,
-Cycplus M1 / M3, CooSpo BC102 / BC107 / BC200. Newer models (NAV, G2+) list rides in
-`workouts.json` instead of `filelist.txt` — not yet handled. Reports welcome.
+The same Nordic UART protocol is used across related devices. Legacy models use the standard
+YMODEM transfer, while the CYCPLUS M3 uses a hybrid transfer: YMODEM-style metadata followed by
+its custom `55 aa` data frames. Discovery accepts legacy `M2_` names and CYCPLUS advertisements.
+Newer models (NAV, G2+) list rides in `workouts.json` instead of `filelist.txt` — not yet handled.
+Reports welcome.
 
 ## What lands in Health Connect
 
@@ -131,6 +135,7 @@ Cycplus M1 / M3, CooSpo BC102 / BC107 / BC200. Newer models (NAV, G2+) list ride
 | `ExerciseSegment` (biking / pause) | gaps in the recording |
 | `HeartRateRecord` | `heart_rate` per record |
 | `CyclingPedalingCadenceRecord` | `cadence` |
+| `PowerRecord` | `power` per record, when a power meter was connected |
 | `SpeedRecord`, `DistanceRecord` | `enhanced_speed`, session total |
 | `ElevationGainedRecord` | `total_ascent` |
 | `TotalCaloriesBurnedRecord` | estimated — see below |

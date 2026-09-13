@@ -16,7 +16,13 @@ data class DeviceSnapshot(
     val totalKb: Int?,
     val seenAt: Instant,
 ) {
-    val usedKb: Int? get() = if (freeKb != null && totalKb != null) totalKb - freeKb else null
+    val usedKb: Int?
+        get() =
+            if (freeKb != null && totalKb != null && freeKb in 0..totalKb) {
+                totalKb - freeKb
+            } else {
+                null
+            }
 
     fun toJson(): JSONObject =
         JSONObject().apply {
@@ -58,6 +64,7 @@ data class RideSummary(
     val movingMin: Long,
     val avgHeartRate: Int?,
     val avgCadence: Int?,
+    val avgPower: Int? = null,
     val ascent: Int?,
     val points: Int,
     val hasRoute: Boolean,
@@ -76,6 +83,7 @@ data class RideSummary(
             put("movingMin", movingMin)
             put("avgHeartRate", avgHeartRate ?: JSONObject.NULL)
             put("avgCadence", avgCadence ?: JSONObject.NULL)
+            put("avgPower", avgPower ?: JSONObject.NULL)
             put("ascent", ascent ?: JSONObject.NULL)
             put("points", points)
             put("hasRoute", hasRoute)
@@ -94,6 +102,7 @@ data class RideSummary(
                 movingMin = o.getLong("movingMin"),
                 avgHeartRate = o.opt("avgHeartRate")?.takeIf { it != JSONObject.NULL }?.let { (it as Number).toInt() },
                 avgCadence = o.opt("avgCadence")?.takeIf { it != JSONObject.NULL }?.let { (it as Number).toInt() },
+                avgPower = o.opt("avgPower")?.takeIf { it != JSONObject.NULL }?.let { (it as Number).toInt() },
                 ascent = o.opt("ascent")?.takeIf { it != JSONObject.NULL }?.let { (it as Number).toInt() },
                 points = o.getInt("points"),
                 hasRoute = o.getBoolean("hasRoute"),

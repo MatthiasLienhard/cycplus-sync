@@ -152,8 +152,8 @@ class HealthWriterTest {
 
     /**
      * Маршрут — отдельное разрешение, а каденс отдельного не имеет и живёт под
-     * тем же WRITE_EXERCISE, что и сама тренировка: девять просимых типов
-     * сворачиваются в восемь строк.
+    * тем же WRITE_EXERCISE, что и сама тренировка: десять просимых типов
+    * сворачиваются в девять строк.
      */
     @Test
     fun `write permissions cover every record the app produces`() {
@@ -164,6 +164,7 @@ class HealthWriterTest {
                 "android.permission.health.WRITE_EXERCISE",
                 "android.permission.health.WRITE_EXERCISE_ROUTE",
                 "android.permission.health.WRITE_HEART_RATE",
+                "android.permission.health.WRITE_POWER",
                 "android.permission.health.WRITE_SPEED",
                 "android.permission.health.WRITE_TOTAL_CALORIES_BURNED",
                 "android.permission.health.WRITE_WEIGHT",
@@ -188,6 +189,7 @@ class HealthWriterTest {
                 "android.permission.health.READ_DISTANCE",
                 "android.permission.health.READ_EXERCISE",
                 "android.permission.health.READ_HEART_RATE",
+                "android.permission.health.READ_POWER",
                 "android.permission.health.READ_SPEED",
                 "android.permission.health.READ_WEIGHT",
             ),
@@ -398,12 +400,13 @@ class HealthWriterTest {
         val origins = runBlocking { HealthWriter.readOrigins(ctx, start, at(600)) }
 
         assertEquals(
-            listOf("heart rate", "speed", "cadence", "distance", "session"),
+            listOf("heart rate", "speed", "cadence", "power", "distance", "session"),
             origins.keys.toList(),
         )
         assertEquals(mapOf("dev.komkov.m2sync" to 5, "com.google.android.apps.fitness" to 7), origins["heart rate"])
         assertEquals(mapOf("dev.komkov.m2sync" to 4), origins["speed"])
         assertEquals(mapOf("dev.komkov.m2sync" to 6), origins["cadence"])
+        assertEquals(emptyMap<String, Int>(), origins["power"])
         // Дистанция считается записями, а не сэмплами: их по одной на источник.
         assertEquals(mapOf("dev.komkov.m2sync" to 1, "com.google.android.apps.fitness" to 1), origins["distance"])
         assertEquals(emptyMap<String, Int>(), origins["session"])
@@ -491,6 +494,21 @@ class HealthWriterTest {
         assertEquals(55.75, route.first().latitude, 1e-9)
         assertEquals(37.61, route.first().longitude, 1e-9)
         assertEquals(150.0, route.first().altitude!!.inMeters, 1e-6)
+    }
+
+    @Test
+    fun `route points outside the session are dropped`() {
+        val points =
+            listOf(
+                point(-1, lat = 55.0, lon = 37.0),
+                point(0, lat = 55.1, lon = 37.1),
+                point(600, lat = 55.2, lon = 37.2),
+                point(601, lat = 55.3, lon = 37.3),
+            )
+
+        runBlocking { HealthWriter.write(ctx, ride(points = points)) }
+
+        assertEquals(listOf(at(0)), routePoints().map { it.time })
     }
 
     /** Точек в заезде тысячи, а Health Connect берёт не больше тысячи. */

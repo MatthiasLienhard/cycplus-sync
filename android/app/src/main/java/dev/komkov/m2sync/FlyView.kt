@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CenterFocusStrong
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.LayersClear
@@ -287,8 +288,6 @@ fun FlyView(
                 }
             }
 
-            Spacer(Modifier.weight(1f))
-
             Surface(
                 Modifier.padding(12.dp).fillMaxWidth(),
                 shape = MaterialTheme.shapes.extraLarge,
@@ -296,6 +295,10 @@ fun FlyView(
                 tonalElevation = 6.dp,
             ) {
                 Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
                             (here?.speedKmh ?: 0.0).roundToInt().toString(),
@@ -310,22 +313,41 @@ fun FlyView(
                             color = scheme.onSurfaceVariant,
                             modifier = Modifier.padding(bottom = 6.dp),
                         )
-                        Spacer(Modifier.weight(1f))
-                        here?.heartRate?.takeIf { it > 0 }?.let {
-                            FlyStat(Icons.Rounded.Favorite, it.toString(), stringResource(R.string.unit_bpm))
+                    }
+
+                    Spacer(Modifier.width(24.dp))
+
+                    Column(
+                        Modifier.weight(1f),
+                        verticalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            here?.heartRate?.takeIf { it > 0 }?.let {
+                                FlyStat(Icons.Rounded.Favorite, it.toString(), stringResource(R.string.unit_bpm))
+                            }
+                            here?.cadence?.takeIf { it > 0 }?.let {
+                                FlyStat(Icons.Rounded.Refresh, it.toString(), stringResource(R.string.unit_rpm))
+                            }
                         }
-                        here?.cadence?.takeIf { it > 0 }?.let {
-                            Spacer(Modifier.width(14.dp))
-                            FlyStat(Icons.Rounded.Refresh, it.toString(), stringResource(R.string.unit_rpm))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            here?.let {
+                                FlyStat(
+                                    Icons.Rounded.Terrain,
+                                    it.altitude.roundToInt().toString(),
+                                    stringResource(R.string.unit_m),
+                                )
+                            }
+                            here?.power?.takeIf { it >= 0 }?.let {
+                                FlyStat(Icons.Rounded.Bolt, it.toString(), stringResource(R.string.unit_watts))
+                            }
                         }
-                        here?.let {
-                            Spacer(Modifier.width(14.dp))
-                            FlyStat(
-                                Icons.Rounded.Terrain,
-                                it.altitude.roundToInt().toString(),
-                                stringResource(R.string.unit_m),
-                            )
-                        }
+                    }
                     }
 
                     Spacer(Modifier.height(12.dp))
@@ -429,6 +451,8 @@ fun FlyView(
                     }
                 }
             }
+
+            Spacer(Modifier.weight(1f))
         }
     }
 }

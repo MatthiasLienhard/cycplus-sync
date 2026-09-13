@@ -9,8 +9,8 @@ import java.io.FileInputStream
 import java.time.Instant
 
 /**
- * Разбор .fit с велокомпьютера. M2 пишет одну сессию на файл, точки с частотой 1 Гц:
- * координаты, скорость, высота, каденс, пульс. Калорий и мощности в файле нет.
+ * Parses a .fit file from the bike computer. M2 writes one session per file with 1 Hz points:
+ * coordinates, speed, altitude, cadence, heart rate, and power when available.
  */
 object FitParser {
     private const val SEMICIRCLES_TO_DEGREES = 180.0 / 2147483648.0
@@ -23,7 +23,8 @@ object FitParser {
         val speed: Double?, // м/с
         val heartRate: Int?,
         val cadence: Int?,
-        val distance: Double?, // м от старта
+        val distance: Double?, // meters from the start
+        val power: Int? = null, // watts
     )
 
     data class Ride(
@@ -37,7 +38,7 @@ object FitParser {
         val totalCalories: Int?,
         val avgHeartRate: Int?,
         val points: List<Point>,
-        /** Отрезки, когда запись реально шла: между ними — паузы велокомпьютера. */
+        /** Intervals where recording was active; gaps between them are bike computer pauses. */
         val activeSpans: List<Pair<Instant, Instant>>,
     ) {
         val hasRoute: Boolean get() = points.any { it.lat != null && it.lon != null }
@@ -51,7 +52,7 @@ object FitParser {
                 }
     }
 
-    /** Пауза = разрыв в записи больше этого числа секунд. */
+    /** A pause is a recording gap longer than this many seconds. */
     private const val PAUSE_GAP_SECONDS = 5L
 
     private fun activeSpans(points: List<Point>): List<Pair<Instant, Instant>> {
@@ -113,6 +114,7 @@ object FitParser {
                         heartRate = mesg.heartRate?.toInt(),
                         cadence = mesg.cadence?.toInt(),
                         distance = mesg.distance?.toDouble(),
+                        power = mesg.power?.toInt(),
                     ),
                 )
             },
@@ -124,7 +126,7 @@ object FitParser {
         points.sortBy { it.time }
 
         val startTime = start ?: points.first().time
-        // Конец считаем по последней точке, но не раньше старта плюс время в движении.
+        // Use the last point for the end, but never before start plus moving time.
         val endTime =
             maxOf(points.last().time, startTime.plusSeconds((elapsed ?: 0.0).toLong()))
                 .let { if (it.isAfter(points.last().time.plusSeconds(3600))) points.last().time else it }

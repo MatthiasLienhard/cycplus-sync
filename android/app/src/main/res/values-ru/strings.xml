@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">M2 Sync</string>
+    <string name="app_name">CYCPLUS Sync</string>
     <string name="rationale">Приложение забирает записанные заезды с велокомпьютера Cycplus M2 по Bluetooth и сохраняет их в Health Connect. Данные никуда не передаются и остаются на устройстве.</string>
     <string name="rationale_what">Что уходит в Health Connect</string>
     <string name="rationale_ride">Заезд: длительность, расстояние, набор высоты</string>

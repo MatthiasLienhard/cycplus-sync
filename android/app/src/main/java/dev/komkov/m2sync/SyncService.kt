@@ -274,8 +274,10 @@ class SyncService : Service() {
                 address = address,
                 firmware = firmware,
                 battery = battery,
-                freeKb = disk?.substringBefore('/')?.trim()?.toIntOrNull(),
-                totalKb = disk?.substringAfter('/')?.trim()?.toIntOrNull(),
+                freeKb = disk?.substringBefore('/')?.trim()?.toIntOrNull()
+                    ?.takeIf { free -> disk.substringAfter('/').trim().toIntOrNull()?.let { total -> free in 0..total } == true },
+                totalKb = disk?.substringAfter('/')?.trim()?.toIntOrNull()
+                    ?.takeIf { total -> disk.substringBefore('/').trim().toIntOrNull()?.let { free -> free in 0..total } == true },
                 seenAt = Instant.now(),
             ),
         )

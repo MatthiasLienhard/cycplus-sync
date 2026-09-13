@@ -29,13 +29,14 @@ object RideStore {
                 .mapNotNull { file ->
                     val known = cached[file.name]
                     if (known != null && known.imported == (file.name in importedNames) &&
-                        known.kcalKey == key
+                        known.kcalKey == key && known.avgPower != null
                     ) {
                         return@mapNotNull known
                     }
                     runCatching {
                         val ride = FitParser.parse(file)
                         val cadences = ride.points.mapNotNull { it.cadence }.filter { it > 0 }
+                        val powers = ride.points.mapNotNull { it.power }.filter { it >= 0 }
                         RideSummary(
                             file = file.name,
                             start = ride.start,
@@ -46,6 +47,7 @@ object RideStore {
                             movingMin = ride.movingSeconds / 60,
                             avgHeartRate = ride.avgHeartRate,
                             avgCadence = if (cadences.isEmpty()) null else cadences.average().toInt(),
+                            avgPower = if (powers.isEmpty()) null else powers.average().toInt(),
                             ascent = ride.totalAscent,
                             points = ride.points.size,
                             hasRoute = ride.hasRoute,

@@ -91,11 +91,46 @@ async def scan(timeout: float = 10.0) -> list[tuple[str, str, int]]:
 class M2:
     """Talks to the device: file list, file download, battery, firmware, free space."""
 
+    def _describe_block(self, block: bytes, block_size: int | None = None) -> str:
+        kind = "?"
+        if len(block) >= 1:
+            if block[0] == SOH:
+                kind = "SOH"
+            elif block[0] == STX:
+                kind = "STX"
+            else:
+                kind = f"0x{block[0]:02x}"
+        size = block_size if block_size is not None else len(block)
+        return (
+            f"kind={kind} total_len={len(block)} parsed_len={size} "
+            f"header={bytes(block[:min(12, len(block))]).hex(' ')} "
+            f"tail={bytes(block[-min(16, len(block)):]).hex(' ')}"
+        )
+
+    def _log_m3_frame(self, frame: bytes) -> None:
+        if len(frame) < 7 or frame[:2] != b"\x55\xaa":
+            return
+        seq = frame[2] if len(frame) > 2 else None
+        flags = frame[3:5].hex(" ") if len(frame) >= 5 else ""
+        trailer = frame[-2:].hex(" ") if len(frame) >= 2 else ""
+        payload = frame[5:-2] if len(frame) >= 7 else b""
+        preview = bytes(frame[:min(24, len(frame))]).hex(" ")
+        ascii_preview = "".join(chr(b) if 32 <= b < 127 else "." for b in payload[:16])
+        crc_be = crc16_arc(payload)
+        crc_le = ((crc_be & 0xFF) << 8) | (crc_be >> 8)
+        self._log(
+            "  M3 frame: "
+            f"seq={seq} flags={flags} payload_len={len(payload)} "
+            f"trailer={trailer} crc_arc_be=0x{crc_be:04x} "
+            f"crc_arc_le=0x{crc_le:04x} preview={preview} ascii={ascii_preview!r}"
+        )
+
     def __init__(self, client: BleakClient, verbose: bool = True):
         self.client = client
         self.verbose = verbose
         self._ctl: asyncio.Queue[bytes] = asyncio.Queue()
         self._tx: asyncio.Queue[bytes] = asyncio.Queue()
+        self._rx_buffer = bytearray()
 
     def _log(self, message: str) -> None:
         if self.verbose:
@@ -168,23 +203,119 @@ class M2:
         return reply[1:-1].decode().strip()
 
     async def _read_block(self, timeout: float = 15.0) -> bytes | None:
-        """Collect one YMODEM block; returns None on EOT."""
-        buf = bytearray()
-        block_size = -1
+        """Collect one block from either the legacy YMODEM path or the M3 custom frame path."""
+        buf = self._rx_buffer
+        self._rx_buffer = bytearray()
+        packet_count = 0
+
         while True:
-            packet = await asyncio.wait_for(self._tx.get(), timeout)
-            if not buf and packet == bytes([EOT]):
-                return None
-            buf += packet
-            if block_size < 0:
-                block_size = 3 + (1024 if buf[0] == STX else 128) + 2
-            if len(buf) >= block_size:
-                break
-        payload = bytes(buf[3 : block_size - 2])
-        crc = (buf[block_size - 2] << 8) | buf[block_size - 1]
-        if crc != crc16_arc(payload):
-            raise M2Error("bad block: CRC mismatch")
-        return payload
+            if buf.startswith(b"\x55\xaa"):
+                if len(buf) < 1031:
+                    packet = await asyncio.wait_for(self._tx.get(), timeout)
+                    packet_count += 1
+                    if packet_count <= 12:
+                        self._log(
+                            f"  raw TX[{packet_count}] len={len(packet)} "
+                            f"head={bytes(packet[:min(16, len(packet))]).hex(' ')}"
+                        )
+                    if packet == bytes([EOT]):
+                        self._rx_buffer = bytearray()
+                        return None
+                    if packet:
+                        buf.extend(packet)
+                    continue
+
+                frame = bytes(buf[:1031])
+                self._log_m3_frame(frame)
+                payload = frame[5:1029]
+                self._rx_buffer = bytearray(buf[1031:])
+                return payload
+
+            if buf:
+                start = buf.find(bytes([SOH]))
+                if start < 0:
+                    start = buf.find(bytes([STX]))
+                if start >= 0:
+                    if start > 0:
+                        self._log(
+                            "  discarding noise before block: "
+                            f"len={start} head={bytes(buf[:min(start, 16)]).hex(' ')}"
+                        )
+                    del buf[:start]
+                else:
+                    if len(buf) >= 1031 and buf.startswith(b"\x55\xaa"):
+                        continue
+                    buf.clear()
+                    packet = await asyncio.wait_for(self._tx.get(), timeout)
+                    packet_count += 1
+                    if packet_count <= 12:
+                        self._log(
+                            f"  raw TX[{packet_count}] len={len(packet)} "
+                            f"head={bytes(packet[:min(16, len(packet))]).hex(' ')}"
+                        )
+                    if packet == bytes([EOT]):
+                        self._rx_buffer = bytearray()
+                        return None
+                    if any(b in packet for b in (SOH, STX, 0x55, 0xAA)):
+                        buf.extend(packet)
+                    continue
+
+            if not buf:
+                packet = await asyncio.wait_for(self._tx.get(), timeout)
+                packet_count += 1
+                if packet_count <= 12:
+                    self._log(
+                        f"  raw TX[{packet_count}] len={len(packet)} "
+                        f"head={bytes(packet[:min(16, len(packet))]).hex(' ')}"
+                    )
+                if packet == bytes([EOT]):
+                    self._rx_buffer = bytearray()
+                    return None
+                if any(b in packet for b in (SOH, STX, 0x55, 0xAA)):
+                    buf.extend(packet)
+                continue
+
+            block_size = 3 + (1024 if buf[0] == STX else 128) + 2
+            if len(buf) < block_size:
+                try:
+                    packet = await asyncio.wait_for(self._tx.get(), timeout)
+                except asyncio.TimeoutError:
+                    raise
+                packet_count += 1
+                if packet_count <= 12:
+                    self._log(
+                        f"  raw TX[{packet_count}] len={len(packet)} "
+                        f"head={bytes(packet[:min(16, len(packet))]).hex(' ')}"
+                    )
+                if packet == bytes([EOT]):
+                    if not buf:
+                        return None
+                    break
+                buf.extend(packet)
+                continue
+
+            payload = bytes(buf[3 : block_size - 2])
+            crc = (buf[block_size - 2] << 8) | buf[block_size - 1]
+            calculated = crc16_arc(payload)
+            if buf[1] != (0xFF ^ buf[2]):
+                self._log(
+                    "  bad block header: "
+                    f"num={buf[1]} inv={buf[2]} "
+                    f"head={bytes(buf[:8]).hex(' ')}"
+                )
+                del buf[0]
+                continue
+            if crc != calculated:
+                self._log(
+                    "  CRC mismatch: "
+                    f"received={crc:04x} calculated={calculated:04x} "
+                    f"payload_len={len(payload)} "
+                    f"{self._describe_block(bytes(buf[:block_size]), block_size)}"
+                )
+                raise M2Error("bad block: CRC mismatch")
+
+            self._rx_buffer = bytearray(buf[block_size:])
+            return payload
 
     async def fetch(self, name: str) -> bytes:
         await self.ensure_idle()
@@ -205,6 +336,7 @@ class M2:
         await self._write(RX, bytes([C]))
 
         data = bytearray()
+        packet_index = 0
         while True:
             try:
                 block = await self._read_block()
@@ -214,6 +346,12 @@ class M2:
                 continue
             if block is None:
                 break
+            packet_index += 1
+            if packet_index <= 3:
+                self._log(
+                    f"  payload block #{packet_index}: "
+                    f"len={len(block)} first16={bytes(block[:16]).hex(' ')}"
+                )
             data += block
             await self._write(RX, bytes([ACK]))
 

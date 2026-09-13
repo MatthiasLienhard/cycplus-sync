@@ -16,11 +16,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -39,6 +36,7 @@ fun RouteMap(
     tiles: TileSource,
     modifier: Modifier = Modifier,
     highlight: Int? = null,
+    metric: TrackMetric? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     val dark = isSystemInDarkTheme()
@@ -129,24 +127,34 @@ fun RouteMap(
                 }
             }
 
-            val path = Path()
-            track.points.forEachIndexed { i, p ->
-                val x = screenX(p.lon)
-                val y = screenY(p.lat)
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            val values = metric?.let { selected ->
+                track.points.mapIndexedNotNull { index, _ -> track.valueAt(index, selected) }
+            }.orEmpty()
+            val minValue = values.minOrNull() ?: 0.0
+            val maxValue = values.maxOrNull() ?: 0.0
+
+            fun metricColor(index: Int): Color {
+                val value = metric?.let { track.valueAt(index, it) } ?: return scheme.primary
+                val fraction = if (maxValue > minValue) {
+                    ((value - minValue) / (maxValue - minValue)).toFloat().coerceIn(0f, 1f)
+                } else {
+                    0.5f
+                }
+                return colorScale(fraction)
             }
 
-            // Обводка под линией: на пёстрой подложке трек без неё сливается.
-            drawPath(
-                path,
-                color = scheme.surface.copy(alpha = 0.85f),
-                style = Stroke(width = 11.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-            )
-            drawPath(
-                path,
-                color = scheme.primary,
-                style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-            )
+            // Draw the route as short segments so the selected metric can color it.
+            track.points.zipWithNext().forEachIndexed { i, (from, to) ->
+                val start = Offset(screenX(from.lon), screenY(from.lat))
+                val end = Offset(screenX(to.lon), screenY(to.lat))
+                drawLine(
+                    color = metricColor(i),
+                    start = start,
+                    end = end,
+                    strokeWidth = 10.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+            }
 
             val first = track.points.first()
             val last = track.points.last()
@@ -155,7 +163,7 @@ fun RouteMap(
 
             track.points.getOrNull(highlight ?: -1)?.let { p ->
                 val at = Offset(screenX(p.lon), screenY(p.lat))
-                drawCircle(scheme.primary.copy(alpha = 0.22f), 18.dp.toPx(), at)
+                drawCircle(metricColor(highlight ?: 0).copy(alpha = 0.22f), 18.dp.toPx(), at)
                 marker(at, scheme.secondary, scheme.surface, radius = 7.dp.toPx())
             }
         }
@@ -170,6 +178,11 @@ fun RouteMap(
             )
         }
     }
+}
+
+private fun colorScale(fraction: Float): Color {
+    val hue = 240f * (1f - fraction.coerceIn(0f, 1f))
+    return Color.hsv(hue, saturation = 0.9f, value = 0.95f)
 }
 
 private fun DrawScope.marker(
